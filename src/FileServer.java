@@ -2,6 +2,7 @@ import java.io.*;
 import java.net.*;
 import java.util.Base64;
 import java.util.zip.CRC32;
+import java.sql.*;
 
 public class FileServer {
     private static final int PORT = 8888;
@@ -46,8 +47,33 @@ public class FileServer {
     private static void initDatabase() {
         // 初始化数据库代码
         // 可使用 JDBC 或其他数据库操作工具
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
+            if (conn != null) {
+                // 创建文件信息表
+                String createTableSQL = "CREATE TABLE IF NOT EXISTS files (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "filename TEXT NOT NULL, " +
+                        "filelength INTEGER NOT NULL)";
+                try (PreparedStatement pstmt = conn.prepareStatement(createTableSQL)) {
+                    pstmt.execute();
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
+    private void saveFileInfo(String fileName, long fileLength) {
+        String sql = "INSERT INTO files(filename, filelength) VALUES(?, ?)";
 
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH);
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, fileName);
+            pstmt.setLong(2, fileLength);
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
     private static class ClientHandler implements Runnable {
         private Socket socket;
 
