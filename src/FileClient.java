@@ -1,14 +1,16 @@
 import java.io.*;
 import java.net.*;
+import java.nio.file.*;
 import java.util.Base64;
 import java.util.Scanner;
-import java.util.zip.CRC32;
 
 public class FileClient {
     private static final String SERVER_HOST = "localhost";
     private static final int SERVER_PORT = 8888;
     private static final String VERSION_FILE = "version.txt";
+    private static final String SERVER_VERSION_FILE = "server_version.txt"; // 新增：服务器版本文件
     private static final String CLIENT_JAR = "Client.jar";
+    private static final String TEMP_CLIENT_JAR = "Client_temp.jar";
 
     private Socket socket;
     private PrintWriter out;
@@ -20,15 +22,18 @@ public class FileClient {
 
     public void start() {
         try {
-            // 启动多线程
-            Thread interactionThread = new Thread(new InteractionTask());
-            interactionThread.start();
-
             // 连接服务器
             connectToServer();
 
-            // 检查版本更新
+            // 1. 检查服务器版本更新
+            checkServerVersionUpdate();
+
+            // 2. 检查客户端自身更新
             checkVersionUpdate();
+
+            // 启动多线程
+            Thread interactionThread = new Thread(new InteractionTask());
+            interactionThread.start();
 
             // 等待用户交互线程结束
             interactionThread.join();
@@ -46,6 +51,93 @@ public class FileClient {
         System.out.println("已连接到服务器");
     }
 
+    // 新增：检查服务器版本更新
+    private void checkServerVersionUpdate() throws IOException {
+        // 接收服务器版本
+        String serverVersionResponse = in.readLine();
+        if (serverVersionResponse != null && serverVersionResponse.startsWith("VERSION")) {
+            String serverVersion = serverVersionResponse.split(" ")[1];
+            String localServerVersion = getLocalServerVersion();
+
+            if (isNewerVersion(serverVersion, localServerVersion)) {
+                System.out.println("发现新服务器版本: " + serverVersion + " (当前: " + localServerVersion + ")");
+                System.out.println("开始更新客户端...");
+                if (downloadNewClient()) {
+                    saveLocalServerVersion(serverVersion);
+                    restartClient();
+                }
+            } else {
+                System.out.println("服务器版本已是最新: " + serverVersion);
+                saveLocalServerVersion(serverVersion);
+            }
+        }
+    }
+
+    private String getLocalServerVersion() {
+        try (BufferedReader reader = new BufferedReader(new FileReader(SERVER_VERSION_FILE))) {
+            return reader.readLine();
+        } catch (IOException e) {
+            return "0";
+        }
+    }
+
+    private void saveLocalServerVersion(String version) {
+        try (FileWriter writer = new FileWriter(SERVER_VERSION_FILE)) {
+            writer.write(version);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private boolean isNewerVersion(String newVersion, String oldVersion) {
+        try {
+            int newVer = Integer.parseInt(newVersion);
+            int oldVer = Integer.parseInt(oldVersion);
+            return newVer > oldVer;
+        } catch (NumberFormatException e) {
+            return newVersion.compareTo(oldVersion) > 0;
+        }
+    }
+
+    private boolean downloadNewClient() {
+        try {
+            out.println("DOWNLOAD_CLIENT");
+            String response = in.readLine();
+            if ("ERROR".equals(response)) {
+                System.out.println("下载失败：服务器端无客户端文件");
+                return false;
+            }
+
+            byte[] newClientBytes = Base64.getDecoder().decode(response);
+            Path tempPath = Paths.get(TEMP_CLIENT_JAR);
+            Files.write(tempPath, newClientBytes);
+
+            // 替换旧客户端
+            File oldClient = new File(CLIENT_JAR);
+            if (oldClient.exists()) {
+                Files.move(tempPath, Paths.get(CLIENT_JAR), StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("客户端更新成功");
+                return true;
+            } else {
+                System.out.println("警告：未找到当前客户端文件，更新未完成");
+                return false;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    private void restartClient() {
+        try {
+            System.out.println("重启客户端...");
+            Runtime.getRuntime().exec("java -jar " + CLIENT_JAR);
+            System.exit(0);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void checkVersionUpdate() throws IOException {
         // 发送版本信息给服务器
         String version = getVersion();
@@ -53,7 +145,7 @@ public class FileClient {
 
         // 接收服务器响应
         String response = in.readLine();
-        if (response.startsWith("NEW_VERSION_AVAILABLE")) {
+        if (response != null && response.startsWith("NEW_VERSION_AVAILABLE")) {
             String newVersion = response.split(" ")[1];
             downloadNewVersion(newVersion);
             System.out.println("新的客户端版本可用，已下载并替换旧版本");

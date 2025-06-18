@@ -9,6 +9,7 @@ public class FileServer {
     private static final String CLIENT_DIR = "client_dir/";
     private static final String FILE_DIR = "file_dir/";
     private static final String DB_PATH = "file_info.db";
+    private static final String CLIENT_JAR = "Client.jar"; // 新增：客户端JAR文件名
 
     public static void main(String[] args) {
         // 创建文件目录
@@ -67,6 +68,8 @@ public class FileServer {
                 while ((command = in.readLine()) != null) {
                     if (command.startsWith("UPLOAD")) {
                         handleUpload(in, out);
+                    } else if (command.startsWith("DOWNLOAD_CLIENT")) { // 新增：处理客户端下载请求
+                        handleDownloadClient(out);
                     } else if (command.startsWith("EXIT")) {
                         break;
                     }
@@ -95,6 +98,26 @@ public class FileServer {
                 }
             } else {
                 out.println("VERSION 0");
+            }
+        }
+
+        // 新增：处理客户端JAR下载
+        private void handleDownloadClient(PrintWriter out) {
+            File clientJar = new File(FILE_DIR + CLIENT_JAR);
+            if (!clientJar.exists()) {
+                out.println("ERROR");
+                return;
+            }
+
+            try (FileInputStream fis = new FileInputStream(clientJar)) {
+                byte[] fileContent = new byte[(int) clientJar.length()];
+                fis.read(fileContent);
+                String base64Content = Base64.getEncoder().encodeToString(fileContent);
+                out.println(base64Content);
+                System.out.println("客户端JAR文件已发送");
+            } catch (IOException e) {
+                e.printStackTrace();
+                out.println("ERROR");
             }
         }
 
