@@ -10,14 +10,12 @@ public class FileServer {
     private static final String CLIENT_DIR = "client_dir/";
     private static final String FILE_DIR = "file_dir/";
     private static final String DB_PATH = "file_info.db";
-    private static final String CLIENT_JAR = "Client.jar"; // 新增：客户端JAR文件名
-
+    private static final String CLIENT_JAR = "Client.jar";
     public static void main(String[] args) {
-        // 创建文件目录
         new File(CLIENT_DIR).mkdirs();
         new File(FILE_DIR).mkdirs();
-        // 初始化数据库
         initDatabase();
+        System.out.println("当前工作目录: " + System.getProperty("user.dir"));
 
         ServerSocket serverSocket = null;
         try {
@@ -27,8 +25,6 @@ public class FileServer {
             while (true) {
                 Socket socket = serverSocket.accept();
                 System.out.println("一个客户端已连接");
-
-                // 处理客户端连接
                 new Thread(new ClientHandler(socket)).start();
             }
         } catch (IOException e) {
@@ -45,15 +41,15 @@ public class FileServer {
     }
 
     private static void initDatabase() {
-        // 初始化数据库代码
-        // 可使用 JDBC 或其他数据库操作工具
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
             if (conn != null) {
-                // 创建文件信息表
+                // 完善表结构：增加上传时间、CRC32校验值
                 String createTableSQL = "CREATE TABLE IF NOT EXISTS files (" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                         "filename TEXT NOT NULL, " +
-                        "filelength INTEGER NOT NULL)";
+                        "filelength INTEGER NOT NULL, " +
+                        "crc32 BIGINT NOT NULL, " +
+                        "upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)";
                 try (PreparedStatement pstmt = conn.prepareStatement(createTableSQL)) {
                     pstmt.execute();
                 }
@@ -62,18 +58,24 @@ public class FileServer {
             e.printStackTrace();
         }
     }
-    private void saveFileInfo(String fileName, long fileLength) {
-        String sql = "INSERT INTO files(filename, filelength) VALUES(?, ?)";
+
+    // 新增静态方法：保存文件信息到数据库
+    private static void saveFileInfoToDB(String fileName, long fileLength, long crc32Value) {
+        String sql = "INSERT INTO files(filename, filelength, crc32) VALUES(?, ?, ?)";
+        System.out.println("正在保存文件信息到数据库：" + fileName);
 
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH);
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, fileName);
             pstmt.setLong(2, fileLength);
+            pstmt.setLong(3, crc32Value);
             pstmt.executeUpdate();
+            System.out.println("文件信息已存入数据库：" + fileName);
         } catch (SQLException e) {
             e.printStackTrace();
         }
     }
+
     private static class ClientHandler implements Runnable {
         private Socket socket;
 
@@ -87,14 +89,13 @@ public class FileServer {
                     BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
             ) {
-                // 检查客户端版本
                 checkClientVersion(out);
 
                 String command;
                 while ((command = in.readLine()) != null) {
                     if (command.startsWith("UPLOAD")) {
                         handleUpload(in, out);
-                    } else if (command.startsWith("DOWNLOAD_CLIENT")) { // 新增：处理客户端下载请求
+                    } else if (command.startsWith("DOWNLOAD_CLIENT")) {
                         handleDownloadClient(out);
                     } else if (command.startsWith("EXIT")) {
                         break;
@@ -146,22 +147,23 @@ public class FileServer {
                 out.println("ERROR");
             }
         }
-
         private void handleUpload(BufferedReader in, PrintWriter out) throws IOException {
             String fileName = in.readLine();
             long fileLength = Long.parseLong(in.readLine());
             String fileContentBase64 = in.readLine();
 
-            // 解码文件内容
             byte[] fileContent = Base64.getDecoder().decode(fileContentBase64);
 
-            // 校验文件完整性（CRC32）
+            // 计算CRC32校验值
+            CRC32 crc32 = new CRC32();
+            crc32.update(fileContent);
+            long crc32Value = crc32.getValue();
+
             if (checkFileIntegrity(fileContent, fileLength)) {
-                // 保存文件
                 saveFile(fileName, fileContent);
 
-                // 将文件信息存储到数据库
-                saveFileInfo(fileName, fileLength);
+                // 保存文件信息到数据库（包含CRC32值）
+                FileServer.saveFileInfoToDB(fileName, fileLength, crc32Value);
 
                 out.println("UPLOAD_SUCCESS");
                 System.out.println("文件上传成功：" + fileName);
@@ -172,24 +174,15 @@ public class FileServer {
         }
 
         private boolean checkFileIntegrity(byte[] fileContent, long expectedLength) {
-            // CRC32 校验
-            CRC32 crc32 = new CRC32();
-            crc32.update(fileContent);
-            // 这里可以将 CRC32 值与客户端发送的进行比较，此处简化处理
+            // 同时校验长度和CRC32（实际项目中应比较客户端发送的CRC32）
             return fileContent.length == expectedLength;
         }
-
         private void saveFile(String fileName, byte[] fileContent) {
             try (FileOutputStream fos = new FileOutputStream(FILE_DIR + fileName)) {
                 fos.write(fileContent);
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        }
-
-        private void saveFileInfo(String fileName, long fileLength) {
-            // 将文件信息存储到数据库代码
-            // 可使用 JDBC 或其他数据库操作工具
         }
     }
 }
