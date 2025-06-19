@@ -8,7 +8,7 @@ public class FileClient {
     private static final String SERVER_HOST = "localhost";
     private static final int SERVER_PORT = 8888;
     private static final String VERSION_FILE = "version.txt";
-    private static final String SERVER_VERSION_FILE = "server_version.txt"; // 新增：服务器版本文件
+    private static final String SERVER_VERSION_FILE = "server_version.txt";
     private static final String CLIENT_JAR = "Client.jar";
     private static final String TEMP_CLIENT_JAR = "Client_temp.jar";
 
@@ -22,20 +22,12 @@ public class FileClient {
 
     public void start() {
         try {
-            // 连接服务器
             connectToServer();
-
-            // 1. 检查服务器版本更新
             checkServerVersionUpdate();
-
-            // 2. 检查客户端自身更新
             checkVersionUpdate();
 
-            // 启动多线程
             Thread interactionThread = new Thread(new InteractionTask());
             interactionThread.start();
-
-            // 等待用户交互线程结束
             interactionThread.join();
         } catch (Exception e) {
             e.printStackTrace();
@@ -51,9 +43,7 @@ public class FileClient {
         System.out.println("已连接到服务器");
     }
 
-    // 新增：检查服务器版本更新
     private void checkServerVersionUpdate() throws IOException {
-        // 接收服务器版本
         String serverVersionResponse = in.readLine();
         if (serverVersionResponse != null && serverVersionResponse.startsWith("VERSION")) {
             String serverVersion = serverVersionResponse.split(" ")[1];
@@ -112,7 +102,6 @@ public class FileClient {
             Path tempPath = Paths.get(TEMP_CLIENT_JAR);
             Files.write(tempPath, newClientBytes);
 
-            // 替换旧客户端
             File oldClient = new File(CLIENT_JAR);
             if (oldClient.exists()) {
                 Files.move(tempPath, Paths.get(CLIENT_JAR), StandardCopyOption.REPLACE_EXISTING);
@@ -139,17 +128,14 @@ public class FileClient {
     }
 
     private void checkVersionUpdate() throws IOException {
-        // 发送版本信息给服务器
         String version = getVersion();
         out.println("CLIENT_VERSION " + version);
 
-        // 接收服务器响应
         String response = in.readLine();
         if (response != null && response.startsWith("NEW_VERSION_AVAILABLE")) {
             String newVersion = response.split(" ")[1];
             downloadNewVersion(newVersion);
             System.out.println("新的客户端版本可用，已下载并替换旧版本");
-            // 退出当前客户端
             System.exit(0);
         }
     }
@@ -167,9 +153,6 @@ public class FileClient {
     }
 
     private void downloadNewVersion(String newVersion) {
-        // 下载新版本客户端代码
-        // 可使用 HTTP 请求或其他方式下载新版本文件
-        // 此处简化处理，实际项目中需实现具体的下载逻辑
         try (FileWriter writer = new FileWriter(VERSION_FILE)) {
             writer.write(newVersion);
         } catch (IOException e) {
@@ -208,23 +191,41 @@ public class FileClient {
         }
 
         try {
-            // 读取文件内容并进行 BASE64 编码
             byte[] fileContent = new byte[(int) file.length()];
             try (FileInputStream fis = new FileInputStream(file)) {
                 fis.read(fileContent);
             }
             String fileContentBase64 = Base64.getEncoder().encodeToString(fileContent);
 
+            // 如果是BMP文件，询问用户要嵌入的消息
+            String messageToEmbed = "";
+            if (fileName.toLowerCase().endsWith(".bmp")) {
+                System.out.println("请输入要嵌入到BMP文件中的消息（直接回车则不嵌入）：");
+                Scanner scanner = new Scanner(System.in);
+                messageToEmbed = scanner.nextLine();
+            }
+
             // 发送上传请求
             out.println("UPLOAD");
             out.println(fileName);
             out.println(file.length());
             out.println(fileContentBase64);
+            out.println(messageToEmbed); // 发送要嵌入的消息
 
             // 接收服务器响应
             String response = in.readLine();
             if ("UPLOAD_SUCCESS".equals(response)) {
                 System.out.println("文件上传成功：" + fileName);
+
+                // 检查原始文件是否包含LSB隐写
+                if (fileName.toLowerCase().endsWith(".bmp")) {
+                    String hiddenMessage = LSBSteganographyAnalyzer.extractLSBMessage(fileContent);
+                    if (hiddenMessage != null) {
+                        System.out.println("原始文件包含LSB隐写信息: " + hiddenMessage);
+                    } else {
+                        System.out.println("原始文件未发现LSB隐写信息");
+                    }
+                }
             } else {
                 System.out.println("文件上传失败：" + fileName);
             }
@@ -235,15 +236,9 @@ public class FileClient {
 
     private void closeConnection() {
         try {
-            if (socket != null) {
-                socket.close();
-            }
-            if (out != null) {
-                out.close();
-            }
-            if (in != null) {
-                in.close();
-            }
+            if (socket != null) socket.close();
+            if (out != null) out.close();
+            if (in != null) in.close();
         } catch (IOException e) {
             e.printStackTrace();
         }

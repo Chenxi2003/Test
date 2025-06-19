@@ -21,7 +21,7 @@ public class ClientGUI extends JFrame {
         super("文件传输客户端");
         initializeUI();
         connectToServer();
-        checkServerVersion(); // 新增：检查服务器版本
+        checkServerVersion();
     }
 
     private void initializeUI() {
@@ -61,7 +61,6 @@ public class ClientGUI extends JFrame {
         }
     }
 
-    // 新增：检查服务器版本
     private void checkServerVersion() {
         try {
             String serverVersionResponse = in.readLine();
@@ -115,12 +114,10 @@ public class ClientGUI extends JFrame {
             Path tempPath = Paths.get(TEMP_CLIENT_JAR);
             Files.write(tempPath, newClientBytes);
 
-            // 替换旧客户端
             File oldClient = new File(CLIENT_JAR);
             if (oldClient.exists()) {
                 Files.move(tempPath, Paths.get(CLIENT_JAR), StandardCopyOption.REPLACE_EXISTING);
                 saveLocalServerVersion(serverVersion);
-
                 JOptionPane.showMessageDialog(this, "客户端更新成功，即将重启");
                 restartClient();
             } else {
@@ -161,16 +158,45 @@ public class ClientGUI extends JFrame {
                 }
                 String fileContentBase64 = Base64.getEncoder().encodeToString(fileContent);
 
+                // 如果是BMP文件，询问用户要嵌入的消息
+                String messageToEmbed = "";
+                if (selectedFile.getName().toLowerCase().endsWith(".bmp")) {
+                    messageToEmbed = JOptionPane.showInputDialog(this,
+                            "请输入要嵌入到BMP文件中的消息",
+                            "隐写消息",
+                            JOptionPane.QUESTION_MESSAGE);
+                    if (messageToEmbed == null) {
+                        messageToEmbed = ""; // 用户取消
+                    }
+                }
+
                 // 发送上传请求
                 out.println("UPLOAD");
                 out.println(selectedFile.getName());
                 out.println(selectedFile.length());
                 out.println(fileContentBase64);
+                out.println(messageToEmbed); // 发送要嵌入的消息
 
                 // 接收服务器响应
                 String response = in.readLine();
                 if ("UPLOAD_SUCCESS".equals(response)) {
                     JOptionPane.showMessageDialog(this, "文件上传成功：" + selectedFile.getName());
+
+                    // 检查原始文件是否包含LSB隐写
+                    if (selectedFile.getName().toLowerCase().endsWith(".bmp")) {
+                        String hiddenMessage = LSBSteganographyAnalyzer.extractLSBMessage(fileContent);
+                        if (hiddenMessage != null) {
+                            JOptionPane.showMessageDialog(this,
+                                    "原始文件包含LSB隐写信息: " + hiddenMessage,
+                                    "隐写分析结果",
+                                    JOptionPane.INFORMATION_MESSAGE);
+                        } else {
+                            JOptionPane.showMessageDialog(this,
+                                    "原始文件未发现LSB隐写信息",
+                                    "隐写分析结果",
+                                    JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    }
                 } else {
                     JOptionPane.showMessageDialog(this, "文件上传失败：" + selectedFile.getName(), "错误", JOptionPane.ERROR_MESSAGE);
                 }
@@ -190,15 +216,9 @@ public class ClientGUI extends JFrame {
     @Override
     public void dispose() {
         try {
-            if (socket != null) {
-                socket.close();
-            }
-            if (out != null) {
-                out.close();
-            }
-            if (in != null) {
-                in.close();
-            }
+            if (socket != null) socket.close();
+            if (out != null) out.close();
+            if (in != null) in.close();
         } catch (IOException e) {
             e.printStackTrace();
         }

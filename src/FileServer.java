@@ -11,6 +11,7 @@ public class FileServer {
     private static final String FILE_DIR = "file_dir/";
     private static final String DB_PATH = "file_info.db";
     private static final String CLIENT_JAR = "Client.jar";
+
     public static void main(String[] args) {
         new File(CLIENT_DIR).mkdirs();
         new File(FILE_DIR).mkdirs();
@@ -43,7 +44,6 @@ public class FileServer {
     private static void initDatabase() {
         try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
             if (conn != null) {
-                // 完善表结构：增加上传时间、CRC32校验值
                 String createTableSQL = "CREATE TABLE IF NOT EXISTS files (" +
                         "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
                         "filename TEXT NOT NULL, " +
@@ -59,7 +59,6 @@ public class FileServer {
         }
     }
 
-    // 新增静态方法：保存文件信息到数据库
     private static void saveFileInfoToDB(String fileName, long fileLength, long crc32Value) {
         String sql = "INSERT INTO files(filename, filelength, crc32) VALUES(?, ?, ?)";
         System.out.println("正在保存文件信息到数据库：" + fileName);
@@ -113,7 +112,6 @@ public class FileServer {
         }
 
         private void checkClientVersion(PrintWriter out) {
-            // 发送版本信息给客户端
             File versionFile = new File(VERSION_FILE);
             if (versionFile.exists()) {
                 try (BufferedReader reader = new BufferedReader(new FileReader(versionFile))) {
@@ -128,7 +126,6 @@ public class FileServer {
             }
         }
 
-        // 新增：处理客户端JAR下载
         private void handleDownloadClient(PrintWriter out) {
             File clientJar = new File(FILE_DIR + CLIENT_JAR);
             if (!clientJar.exists()) {
@@ -147,23 +144,42 @@ public class FileServer {
                 out.println("ERROR");
             }
         }
+
         private void handleUpload(BufferedReader in, PrintWriter out) throws IOException {
             String fileName = in.readLine();
             long fileLength = Long.parseLong(in.readLine());
             String fileContentBase64 = in.readLine();
+            // 读取要嵌入的消息
+            String messageToEmbed = in.readLine();
 
             byte[] fileContent = Base64.getDecoder().decode(fileContentBase64);
 
-            // 计算CRC32校验值
+            // 计算原始文件的CRC32校验值
             CRC32 crc32 = new CRC32();
             crc32.update(fileContent);
-            long crc32Value = crc32.getValue();
+            long originalCrc32 = crc32.getValue();
 
-            if (checkFileIntegrity(fileContent, fileLength)) {
-                saveFile(fileName, fileContent);
+            byte[] finalFileContent = fileContent;
+            long finalCrc32 = originalCrc32;
 
-                // 保存文件信息到数据库（包含CRC32值）
-                FileServer.saveFileInfoToDB(fileName, fileLength, crc32Value);
+            // 如果文件是BMP且有要嵌入的消息，则进行隐写
+            if (fileName.toLowerCase().endsWith(".bmp") && messageToEmbed != null && !messageToEmbed.isEmpty()) {
+                byte[] stegoContent = LSBSteganographyEmbedder.embedMessage(fileContent, messageToEmbed);
+                if (stegoContent != null) {
+                    finalFileContent = stegoContent;
+                    // 重新计算CRC32
+                    crc32.reset();
+                    crc32.update(finalFileContent);
+                    finalCrc32 = crc32.getValue();
+                    System.out.println("已将消息嵌入到BMP文件中: " + messageToEmbed);
+                }
+            }
+
+            if (checkFileIntegrity(finalFileContent, fileLength)) {
+                saveFile(fileName, finalFileContent);
+
+                // 保存文件信息到数据库
+                FileServer.saveFileInfoToDB(fileName, fileLength, finalCrc32);
 
                 out.println("UPLOAD_SUCCESS");
                 System.out.println("文件上传成功：" + fileName);
@@ -171,12 +187,29 @@ public class FileServer {
                 out.println("UPLOAD_FAILED");
                 System.out.println("文件上传失败，校验失败：" + fileName);
             }
+            // 嵌入消息后提取隐写信息
+            String extractedMessage = null;
+            if (fileName.toLowerCase().endsWith(".bmp") && !messageToEmbed.isEmpty()) {
+                extractedMessage = LSBSteganographyAnalyzer.extractLSBMessage(finalFileContent);
+            }
+
+            if (checkFileIntegrity(finalFileContent, fileLength)) {
+                saveFile(fileName, finalFileContent);
+                FileServer.saveFileInfoToDB(fileName, fileLength, finalCrc32);
+
+                // 返回上传成功和隐写信息
+                out.println("UPLOAD_SUCCESS");
+                out.println(extractedMessage != null ? extractedMessage : "NO_STEGO_DETECTED"); // 新增行
+                System.out.println("文件上传成功：" + fileName);
+            } else {
+                out.println("UPLOAD_FAILED");
+            }
         }
 
         private boolean checkFileIntegrity(byte[] fileContent, long expectedLength) {
-            // 同时校验长度和CRC32（实际项目中应比较客户端发送的CRC32）
             return fileContent.length == expectedLength;
         }
+
         private void saveFile(String fileName, byte[] fileContent) {
             try (FileOutputStream fos = new FileOutputStream(FILE_DIR + fileName)) {
                 fos.write(fileContent);

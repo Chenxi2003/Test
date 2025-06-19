@@ -25,8 +25,8 @@ public class FileInfoViewer {
                 long crc32 = rs.getLong("crc32");
                 String uploadTime = rs.getString("upload_time");
 
-                System.out.printf("%-5d %-20s %-10d %-15d %-20s\n", 
-                    id, fileName, fileLength, crc32, uploadTime);
+                System.out.printf("%-5d %-20s %-10d %-15d %-20s\n",
+                        id, fileName, fileLength, crc32, uploadTime);
             }
 
         } catch (Exception e) {
